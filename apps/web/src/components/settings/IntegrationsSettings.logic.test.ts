@@ -85,6 +85,7 @@ const failure = (reason: string) => ({
 
 describe("importFailureReason", () => {
   it("recovers the reason token from the flattened message", () => {
+    expect(importFailureReason(failure("needsFullDiskAccess"))).toBe("needsFullDiskAccess");
     expect(importFailureReason(failure("browserRunning"))).toBe("browserRunning");
     expect(importFailureReason(failure("readFailed"))).toBe("readFailed");
     // A settings write that fails after the cookies landed is its own case,
