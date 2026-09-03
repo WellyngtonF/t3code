@@ -391,6 +391,23 @@ describe("Antigravity stdout compatibility", () => {
 });
 
 describe("Antigravity stderr compatibility", () => {
+  it.effect("forwards an accepted browser-helper URL larger than 8 KiB", () =>
+    Effect.gen(function* () {
+      const urls: string[] = [];
+      const longAuthorizationUrl = `${authorizationUrl}&scope=${"a".repeat(9_000)}`;
+      const handleStderr = makeAntigravityStderrHandler({
+        onAuthorizationUrl: (url) => Effect.sync(() => void urls.push(url)),
+      });
+
+      expect(longAuthorizationUrl.length).toBeGreaterThan(8_192);
+      yield* handleStderr(
+        `${ANTIGRAVITY_AUTH_BROWSER_MARKER}${encodeUnknownJson(longAuthorizationUrl)}\n`,
+      );
+
+      expect(urls).toEqual([longAuthorizationUrl]);
+    }),
+  );
+
   it.effect("forwards a fragmented browser-helper URL without exposing other stderr", () =>
     Effect.gen(function* () {
       const urls: string[] = [];
