@@ -17,6 +17,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 import * as AcpErrors from "effect-acp/errors";
 
 import {
+  ANTIGRAVITY_AUTH_BROWSER_MARKER,
   ANTIGRAVITY_AUTH_STDOUT_PREFIX,
   ANTIGRAVITY_PERSONAL_AUTH,
   ANTIGRAVITY_SIGN_IN_REQUIRED_MESSAGE,
@@ -26,6 +27,7 @@ import {
   antigravityProfileSettings,
   buildAntigravityAcpSpawnInput,
   isAntigravitySignInRequiredError,
+  makeAntigravityStderrHandler,
   makeAntigravityStdoutTransform,
   parseAntigravityAuthorizationUrl,
   prepareAntigravityProfile,
@@ -384,6 +386,43 @@ describe("Antigravity stdout compatibility", () => {
         _tag: "AcpTransportError",
         detail: "Antigravity sent a protocol line that is too large.",
       });
+    }),
+  );
+});
+
+describe("Antigravity stderr compatibility", () => {
+  it.effect("forwards a fragmented browser-helper URL without exposing other stderr", () =>
+    Effect.gen(function* () {
+      const urls: string[] = [];
+      const markerLine = `${ANTIGRAVITY_AUTH_BROWSER_MARKER}${encodeUnknownJson(authorizationUrl)}\n`;
+      const handleStderr = makeAntigravityStderrHandler({
+        onAuthorizationUrl: (url) => Effect.sync(() => void urls.push(url)),
+      });
+
+      yield* handleStderr(`native log\n${markerLine.slice(0, 12)}`);
+      yield* handleStderr(markerLine.slice(12, 70));
+      yield* handleStderr(`${markerLine.slice(70)}another native log\n`);
+
+      expect(urls).toEqual([authorizationUrl]);
+    }),
+  );
+
+  it.effect("ignores malformed and similar browser-helper messages", () =>
+    Effect.gen(function* () {
+      const urls: string[] = [];
+      const handleStderr = makeAntigravityStderrHandler({
+        onAuthorizationUrl: (url) => Effect.sync(() => void urls.push(url)),
+      });
+
+      yield* handleStderr(
+        ` ${ANTIGRAVITY_AUTH_BROWSER_MARKER}${encodeUnknownJson(authorizationUrl)}\n`,
+      );
+      yield* handleStderr(`${ANTIGRAVITY_AUTH_BROWSER_MARKER}${authorizationUrl}\n`);
+      yield* handleStderr(
+        `${ANTIGRAVITY_AUTH_BROWSER_MARKER}${encodeUnknownJson("https://example.com")}\n`,
+      );
+
+      expect(urls).toEqual([]);
     }),
   );
 });
