@@ -54,6 +54,7 @@ const phase = (auth: AntigravityAuth, value: ProviderAuthState["phase"], session
 const makeHarness = Effect.fn("makeAuthTestHarness")(function* (
   options: {
     readonly interactive?: boolean;
+    readonly authorizationUrls?: ReadonlyArray<string>;
     readonly supportsLogout?: boolean;
     readonly forwardCallback?: Effect.Effect<void, ProviderSetupError>;
   } = {},
@@ -87,7 +88,9 @@ const makeHarness = Effect.fn("makeAuthTestHarness")(function* (
             Effect.gen(function* () {
               events.push("authenticate");
               if (options.interactive !== false && input.onAuthorizationUrl) {
-                yield* input.onAuthorizationUrl(authorizationUrl);
+                for (const url of options.authorizationUrls ?? [authorizationUrl]) {
+                  yield* input.onAuthorizationUrl(url);
+                }
               }
               yield* Deferred.await(authenticated);
               events.push("session-new");
@@ -128,6 +131,34 @@ const makeHarness = Effect.fn("makeAuthTestHarness")(function* (
 });
 
 it.layer(NodeServices.layer)("AntigravityAuth", (it) => {
+  it.effect("accepts the same authorization URL from stderr and stdout", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        authorizationUrls: [authorizationUrl, authorizationUrl],
+      });
+      yield* harness.auth.controller.start(owner);
+      const waiting = yield* phase(harness.auth, "waiting");
+      assert.equal(waiting.authorizationUrl, authorizationUrl);
+
+      yield* Deferred.succeed(harness.authenticated, undefined);
+      yield* Deferred.succeed(harness.discovered, undefined);
+      yield* phase(harness.auth, "succeeded");
+    }),
+  );
+
+  it.effect("rejects a different second authorization URL", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        authorizationUrls: [authorizationUrl, `${authorizationUrl}&scope=another-request`],
+      });
+      yield* harness.auth.controller.start(owner);
+
+      const failed = yield* phase(harness.auth, "failed");
+      assert.isNull(failed.authorizationUrl);
+      assert.deepEqual(harness.catalog(), ["previous-account-model"]);
+    }),
+  );
+
   it.effect("keeps a remote flow private and waits for native auth and catalog discovery", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
