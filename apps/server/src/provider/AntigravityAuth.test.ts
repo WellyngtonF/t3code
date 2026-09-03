@@ -63,12 +63,16 @@ const makeHarness = Effect.fn("makeAuthTestHarness")(function* (
   const discovered = yield* Deferred.make<void>();
   const closed = yield* Deferred.make<void>();
   const events: string[] = [];
+  let receiveAuthorizationUrl:
+    | ((url: string) => Effect.Effect<void, AcpErrors.AcpError>)
+    | undefined;
   let forwarded = 0;
   let catalog = ["previous-account-model"];
   const auth = yield* makeAntigravityAuth({
     instanceId,
     makeRuntime: (input) =>
       Effect.gen(function* () {
+        receiveAuthorizationUrl = input.onAuthorizationUrl;
         events.push("process-open");
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {
@@ -127,6 +131,12 @@ const makeHarness = Effect.fn("makeAuthTestHarness")(function* (
     events,
     catalog: () => catalog,
     forwarded: () => forwarded,
+    receiveAuthorizationUrl: (url: string) =>
+      Effect.suspend(() =>
+        receiveAuthorizationUrl
+          ? receiveAuthorizationUrl(url)
+          : Effect.die("Authorization URL receiver is not ready."),
+      ),
   };
 });
 
@@ -139,6 +149,24 @@ it.layer(NodeServices.layer)("AntigravityAuth", (it) => {
       yield* harness.auth.controller.start(owner);
       const waiting = yield* phase(harness.auth, "waiting");
       assert.equal(waiting.authorizationUrl, authorizationUrl);
+
+      yield* Deferred.succeed(harness.authenticated, undefined);
+      yield* Deferred.succeed(harness.discovered, undefined);
+      yield* phase(harness.auth, "succeeded");
+    }),
+  );
+
+  it.effect("accepts a delayed duplicate after callback completion starts", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const state = yield* harness.auth.controller.start(owner);
+      yield* phase(harness.auth, "waiting");
+      yield* harness.auth.controller.complete(owner, {
+        flowId: state.flowId!,
+        callbackUrl,
+      });
+
+      yield* harness.receiveAuthorizationUrl(authorizationUrl);
 
       yield* Deferred.succeed(harness.authenticated, undefined);
       yield* Deferred.succeed(harness.discovered, undefined);
